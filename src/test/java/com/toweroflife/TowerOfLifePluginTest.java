@@ -116,4 +116,14 @@ public class TowerOfLifePluginTest
 		assertTrue(m.find());
 		assertEquals("Feather", m.group(1));
 	}
+
+	@Test
+	public void parseInspectReadsPlacedItems()
+	{
+		assertEquals(ImmutableSet.of(ItemID.EYE_OF_NEWT),
+			TowerOfLifePlugin.parseInspect(Altar.NEWTROOST, "There is an eye of newt placed on the altar."));
+		assertEquals(ImmutableSet.of(ItemID.RED_SPIDERS_EGGS, ItemID.RAW_SARDINE),
+			TowerOfLifePlugin.parseInspect(Altar.SPIDINE, "There is some red spiders' eggs and a raw sardine<br>placed on the altar."));
+		assertNull(TowerOfLifePlugin.parseInspect(Altar.NEWTROOST, "Feather of chicken and eye of newt..."));
+	}
 }

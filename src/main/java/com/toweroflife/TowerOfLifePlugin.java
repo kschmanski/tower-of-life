@@ -37,6 +37,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import javax.annotation.Nullable;
 import javax.inject.Inject;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -56,10 +57,12 @@ import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameObjectDespawned;
 import net.runelite.api.events.GameObjectSpawned;
 import net.runelite.api.events.GameStateChanged;
+import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.NpcSpawned;
 import net.runelite.api.events.VarbitChanged;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.ObjectID;
 import net.runelite.api.gameval.VarbitID;
@@ -152,6 +155,9 @@ public class TowerOfLifePlugin extends Plugin
 	private Altar pendingActivation;
 	private int pendingActivationTick;
 
+	private Altar pendingInspect;
+	private int pendingInspectTick;
+
 	private int lastPlacedItem = -1;
 	private int lastPlacedTick;
 	private int lastSetVarbit = -1;
@@ -192,6 +198,7 @@ public class TowerOfLifePlugin extends Plugin
 		inventoryKnown = false;
 		pendingItem = -1;
 		pendingActivation = null;
+		pendingInspect = null;
 		lastPlacedItem = -1;
 		lastSetVarbit = -1;
 	}
@@ -250,6 +257,7 @@ public class TowerOfLifePlugin extends Plugin
 				inventoryKnown = false;
 				pendingItem = -1;
 				pendingActivation = null;
+				pendingInspect = null;
 				break;
 			case LOGGED_IN:
 				// The RuneScape profile (used for per-account state) is only known once logged in
@@ -323,6 +331,78 @@ public class TowerOfLifePlugin extends Plugin
 				}
 			}
 		}
+		else if ("Inspect".equals(Text.removeTags(event.getMenuOption())))
+		{
+			WorldView wv = client.getTopLevelWorldView();
+			pendingInspect = Altar.nearest(WorldPoint.fromScene(wv, event.getParam0(), event.getParam1(), wv.getPlane()));
+			pendingInspectTick = client.getTickCount();
+		}
+	}
+
+	@Subscribe
+	public void onGameTick(GameTick event)
+	{
+		if (pendingInspect == null)
+		{
+			return;
+		}
+
+		if (client.getTickCount() - pendingInspectTick > PENDING_TIMEOUT_TICKS)
+		{
+			pendingInspect = null;
+			return;
+		}
+
+		Widget text = client.getWidget(InterfaceID.Objectbox.TEXT);
+		if (text == null || text.isHidden())
+		{
+			return;
+		}
+
+		Set<Integer> placed = parseInspect(pendingInspect, text.getText());
+		if (placed == null)
+		{
+			return;
+		}
+
+		log.debug("Inspect of {} altar shows placed items {}", pendingInspect, placed);
+		for (int itemId : pendingInspect.getItemIds())
+		{
+			if (placed.contains(itemId))
+			{
+				markPlaced(itemId);
+			}
+			else
+			{
+				unmarkPlaced(itemId);
+			}
+		}
+		pendingInspect = null;
+	}
+
+	/**
+	 * Parses the Inspect dialogue of an altar, e.g. "There is an eye of newt placed on the altar."
+	 *
+	 * @return the altar's items named as placed, or null if the text is not a placed-items message
+	 */
+	@Nullable
+	static Set<Integer> parseInspect(Altar altar, String text)
+	{
+		String normalized = Text.removeTags(text).toLowerCase().replace("'", "");
+		if (!normalized.contains("placed on the altar"))
+		{
+			return null;
+		}
+
+		Set<Integer> placed = new HashSet<>();
+		for (int itemId : altar.getItemIds())
+		{
+			if (normalized.contains(altar.getItemName(itemId).toLowerCase().replace("'", "")))
+			{
+				placed.add(itemId);
+			}
+		}
+		return placed;
 	}
 
 	@Subscribe
@@ -536,6 +616,15 @@ public class TowerOfLifePlugin extends Plugin
 		}
 		placedTicks.put(itemId, client.getTickCount());
 		if (locallyPlaced.add(itemId))
+		{
+			savePlacedItems();
+		}
+	}
+
+	private void unmarkPlaced(int itemId)
+	{
+		placedTicks.remove(itemId);
+		if (locallyPlaced.remove(itemId))
 		{
 			savePlacedItems();
 		}
