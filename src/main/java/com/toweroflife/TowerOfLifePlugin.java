@@ -26,6 +26,7 @@ package com.toweroflife;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.inject.Provides;
 import java.util.Collections;
@@ -37,6 +38,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import javax.annotation.Nullable;
 import javax.inject.Inject;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -56,11 +58,14 @@ import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameObjectDespawned;
 import net.runelite.api.events.GameObjectSpawned;
 import net.runelite.api.events.GameStateChanged;
+import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.NpcSpawned;
 import net.runelite.api.events.VarbitChanged;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
+import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.ObjectID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
@@ -98,7 +103,28 @@ public class TowerOfLifePlugin extends Plugin
 	);
 
 	private static final String ALTAR_NAME = "Symbol of life";
-	static final Pattern PLACED_MESSAGE = Pattern.compile("placed? the (.+?) on the altar", Pattern.CASE_INSENSITIVE);
+	static final Pattern PLACED_MESSAGE = Pattern.compile("placed? (?:an?|some|the) (.+?) on the altar", Pattern.CASE_INSENSITIVE);
+
+	/**
+	 * Which item each symbol varbit tracks, confirmed in game. Each altar uses a pair of
+	 * adjacent varbits, clockwise from the north-west altar, with the first item named in
+	 * the altar's inspect text on the lower varbit. Raw jubbly and raw chicken follow from
+	 * the other item of their pair.
+	 */
+	static final Map<Integer, Integer> KNOWN_VARBITS = ImmutableMap.<Integer, Integer>builder()
+		.put(VarbitID.TOL_SYMBOL_OBJ1, ItemID.UNICORN_HORN)
+		.put(VarbitID.TOL_SYMBOL_OBJ2, ItemID.COW_HIDE)
+		.put(VarbitID.TOL_SYMBOL_OBJ3, ItemID.FEATHER)
+		.put(VarbitID.TOL_SYMBOL_OBJ4, ItemID.EYE_OF_NEWT)
+		.put(VarbitID.TOL_SYMBOL_OBJ5, ItemID._100_JUBBLY_MEAT_RAW)
+		.put(VarbitID.TOL_SYMBOL_OBJ6, ItemID.RAW_LOBSTER)
+		.put(VarbitID.TOL_SYMBOL_OBJ7, ItemID.RED_SPIDERS_EGGS)
+		.put(VarbitID.TOL_SYMBOL_OBJ8, ItemID.RAW_SARDINE)
+		.put(VarbitID.TOL_SYMBOL_OBJ9, ItemID.RAW_SWORDFISH)
+		.put(VarbitID.TOL_SYMBOL_OBJ10, ItemID.RAW_CHICKEN)
+		.put(VarbitID.TOL_SYMBOL_OBJ11, ItemID.GIANT_FROG_LEGS)
+		.put(VarbitID.TOL_SYMBOL_OBJ12, ItemID.RAW_CAVE_EEL)
+		.build();
 
 	private static final String VARBIT_MAPPING_KEY = "varbitMapping";
 	private static final String PLACED_ITEMS_KEY = "placedItems";
@@ -131,6 +157,13 @@ public class TowerOfLifePlugin extends Plugin
 	/** Items we saw the player place, used for items whose varbit is not learned yet. */
 	private final Set<Integer> locallyPlaced = new HashSet<>();
 
+	/**
+	 * Tick each item was last seen placed this session. Used so that activating an altar
+	 * only clears items placed before the activation, not ones pre-loaded while the
+	 * creature was still spawning.
+	 */
+	private final Map<Integer, Integer> placedTicks = new HashMap<>();
+
 	/** Learned symbol varbit id -> item id. */
 	private final Map<Integer, Integer> varbitToItem = new HashMap<>();
 	private final Map<Integer, Integer> itemToVarbit = new HashMap<>();
@@ -144,6 +177,9 @@ public class TowerOfLifePlugin extends Plugin
 
 	private Altar pendingActivation;
 	private int pendingActivationTick;
+
+	private Altar pendingInspect;
+	private int pendingInspectTick;
 
 	private int lastPlacedItem = -1;
 	private int lastPlacedTick;
@@ -178,12 +214,14 @@ public class TowerOfLifePlugin extends Plugin
 		overlayManager.remove(overlay);
 		altars.clear();
 		locallyPlaced.clear();
+		placedTicks.clear();
 		varbitToItem.clear();
 		itemToVarbit.clear();
 		inventoryCounts.clear();
 		inventoryKnown = false;
 		pendingItem = -1;
 		pendingActivation = null;
+		pendingInspect = null;
 		lastPlacedItem = -1;
 		lastSetVarbit = -1;
 	}
@@ -211,6 +249,22 @@ public class TowerOfLifePlugin extends Plugin
 		return isPlaced(altar.getFirstItemId()) && isPlaced(altar.getSecondItemId());
 	}
 
+	/**
+	 * @return whether activating now would create the creature: every item is either
+	 * on the altar or in the inventory, where activating takes it from
+	 */
+	private boolean canActivate(Altar altar)
+	{
+		for (int itemId : altar.getItemIds())
+		{
+			if (!isPlaced(itemId) && !isInInventory(itemId))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event)
 	{
@@ -226,6 +280,7 @@ public class TowerOfLifePlugin extends Plugin
 				inventoryKnown = false;
 				pendingItem = -1;
 				pendingActivation = null;
+				pendingInspect = null;
 				break;
 			case LOGGED_IN:
 				// The RuneScape profile (used for per-account state) is only known once logged in
@@ -280,10 +335,122 @@ public class TowerOfLifePlugin extends Plugin
 			Altar altar = Altar.nearest(point);
 			if (altar != null)
 			{
-				pendingActivation = altar;
-				pendingActivationTick = client.getTickCount();
+				// A new click replaces any "use item" still queued on this altar, so an item
+				// leaving the inventory now is the activation consuming it, not a placement
+				if (altar.requires(pendingItem))
+				{
+					pendingItem = -1;
+				}
+
+				// Only a click that can create the creature counts. Repeated clicks on an
+				// altar that is not loaded must not move the activation tick past items
+				// pre-loaded for the next creature.
+				boolean alreadyActivating = pendingActivation == altar
+					&& client.getTickCount() - pendingActivationTick <= PENDING_TIMEOUT_TICKS;
+				if (canActivate(altar) && !alreadyActivating)
+				{
+					pendingActivation = altar;
+					pendingActivationTick = client.getTickCount();
+				}
 			}
 		}
+		else if ("Inspect".equals(Text.removeTags(event.getMenuOption())))
+		{
+			WorldView wv = client.getTopLevelWorldView();
+			pendingInspect = Altar.nearest(WorldPoint.fromScene(wv, event.getParam0(), event.getParam1(), wv.getPlane()));
+			pendingInspectTick = client.getTickCount();
+		}
+	}
+
+	@Subscribe
+	public void onGameTick(GameTick event)
+	{
+		if (pendingInspect == null)
+		{
+			return;
+		}
+
+		if (client.getTickCount() - pendingInspectTick > PENDING_TIMEOUT_TICKS)
+		{
+			pendingInspect = null;
+			return;
+		}
+
+		// One-item box: "There is an eye of newt placed on the altar."
+		// Two-item box: the recipe (empty altar) or "You have all the materials..."
+		Set<Integer> placed = parseInspect(pendingInspect, dialogueText(InterfaceID.Objectbox.TEXT));
+		if (placed == null)
+		{
+			placed = parseInspect(pendingInspect, dialogueText(InterfaceID.ObjectboxDouble.TEXT));
+		}
+		if (placed == null)
+		{
+			return;
+		}
+
+		log.debug("Inspect of {} altar shows placed items {}", pendingInspect, placed);
+		for (int itemId : pendingInspect.getItemIds())
+		{
+			if (placed.contains(itemId))
+			{
+				markPlaced(itemId);
+			}
+			else
+			{
+				unmarkPlaced(itemId);
+			}
+		}
+		pendingInspect = null;
+	}
+
+	@Nullable
+	private String dialogueText(int componentId)
+	{
+		Widget widget = client.getWidget(componentId);
+		return widget == null || widget.isHidden() ? null : widget.getText();
+	}
+
+	/**
+	 * Parses the Inspect dialogue of an altar: "There is an eye of newt placed on the altar.",
+	 * "You have all the materials necessary to activate this altar!", or the recipe
+	 * ("You see some text scrolled above the altar on a symbol: ...") for an empty altar.
+	 *
+	 * @return the altar's items that are placed, or null if the text is none of these
+	 */
+	@Nullable
+	static Set<Integer> parseInspect(Altar altar, String text)
+	{
+		if (text == null)
+		{
+			return null;
+		}
+
+		String normalized = Text.removeTags(text).toLowerCase().replace("'", "");
+		Set<Integer> placed = new HashSet<>();
+		if (normalized.contains("you have all the materials"))
+		{
+			placed.add(altar.getFirstItemId());
+			placed.add(altar.getSecondItemId());
+			return placed;
+		}
+		if (normalized.contains("text scrolled above the altar"))
+		{
+			// The recipe is shown when nothing is on the altar
+			return placed;
+		}
+		if (!normalized.contains("placed on the altar"))
+		{
+			return null;
+		}
+
+		for (int itemId : altar.getItemIds())
+		{
+			if (normalized.contains(altar.getItemName(itemId).toLowerCase().replace("'", "")))
+			{
+				placed.add(itemId);
+			}
+		}
+		return placed;
 	}
 
 	@Subscribe
@@ -336,7 +503,7 @@ public class TowerOfLifePlugin extends Plugin
 	@Subscribe
 	public void onChatMessage(ChatMessage event)
 	{
-		// e.g. "You place the raw lobster on the altar." or "You already placed the feather on the altar!"
+		// e.g. "You place a raw cave eel on the altar." (a backup for when no varbit changes)
 		Matcher matcher = PLACED_MESSAGE.matcher(Text.removeTags(event.getMessage()));
 		if (!matcher.find())
 		{
@@ -369,10 +536,15 @@ public class TowerOfLifePlugin extends Plugin
 		if (npc.getId() == pendingActivation.getNpcId()
 			&& npc.getWorldLocation().distanceTo2D(pendingActivation.getLocation()) <= CREATURE_SPAWN_DISTANCE)
 		{
-			// Our creature appeared, so the altar consumed both items
+			// Our creature appeared, so the altar consumed the items it had when activated.
+			// Keep any item placed after the Activate click (pre-loaded for the next creature).
 			for (int itemId : pendingActivation.getItemIds())
 			{
-				locallyPlaced.remove(itemId);
+				if (!placedAfter(itemId, pendingActivationTick))
+				{
+					locallyPlaced.remove(itemId);
+					placedTicks.remove(itemId);
+				}
 			}
 			savePlacedItems();
 			pendingActivation = null;
@@ -490,10 +662,30 @@ public class TowerOfLifePlugin extends Plugin
 		{
 			pendingItem = -1;
 		}
+		placedTicks.put(itemId, client.getTickCount());
 		if (locallyPlaced.add(itemId))
 		{
 			savePlacedItems();
 		}
+	}
+
+	private void unmarkPlaced(int itemId)
+	{
+		placedTicks.remove(itemId);
+		if (locallyPlaced.remove(itemId))
+		{
+			savePlacedItems();
+		}
+	}
+
+	/**
+	 * @return whether the item was placed after the given tick. Items restored from a
+	 * previous session have no tick and count as placed before it.
+	 */
+	private boolean placedAfter(int itemId, int tick)
+	{
+		Integer placed = placedTicks.get(itemId);
+		return placed != null && placed > tick;
 	}
 
 	/**
@@ -536,7 +728,7 @@ public class TowerOfLifePlugin extends Plugin
 	{
 		varbitToItem.clear();
 		itemToVarbit.clear();
-		varbitToItem.putAll(parseMapping(configManager.getConfiguration(TowerOfLifeConfig.GROUP, VARBIT_MAPPING_KEY)));
+		varbitToItem.putAll(withKnownVarbits(parseMapping(configManager.getConfiguration(TowerOfLifeConfig.GROUP, VARBIT_MAPPING_KEY))));
 		varbitToItem.forEach((varbit, item) -> itemToVarbit.put(item, varbit));
 	}
 
@@ -594,6 +786,23 @@ public class TowerOfLifePlugin extends Plugin
 				log.debug("Ignoring bad varbit mapping entry {}", entry);
 			}
 		}
+		return mapping;
+	}
+
+	/**
+	 * Combines the confirmed varbits with learned ones. Confirmed entries win, and a
+	 * learned entry that conflicts with one (same varbit or same item) is dropped.
+	 */
+	static Map<Integer, Integer> withKnownVarbits(Map<Integer, Integer> learned)
+	{
+		Map<Integer, Integer> mapping = new HashMap<>(KNOWN_VARBITS);
+		learned.forEach((varbit, item) ->
+		{
+			if (!mapping.containsKey(varbit) && !mapping.containsValue(item))
+			{
+				mapping.put(varbit, item);
+			}
+		});
 		return mapping;
 	}
 

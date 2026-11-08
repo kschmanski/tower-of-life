@@ -112,8 +112,50 @@ public class TowerOfLifePluginTest
 		assertTrue(m.find());
 		assertEquals("raw lobster", m.group(1));
 
-		m = TowerOfLifePlugin.PLACED_MESSAGE.matcher("You already placed the Feather on the altar!");
+		m = TowerOfLifePlugin.PLACED_MESSAGE.matcher("You place a cow hide on the altar. You have all the materials necessary to activate this altar!");
 		assertTrue(m.find());
-		assertEquals("Feather", m.group(1));
+		assertEquals("cow hide", m.group(1));
+		assertEquals(ItemID.COW_HIDE, Altar.itemIdForName(m.group(1)));
+
+		m = TowerOfLifePlugin.PLACED_MESSAGE.matcher("You place an eye of newt on the altar.");
+		assertTrue(m.find());
+		assertEquals(ItemID.EYE_OF_NEWT, Altar.itemIdForName(m.group(1)));
+	}
+
+	@Test
+	public void parseInspectReadsPlacedItems()
+	{
+		assertEquals(ImmutableSet.of(ItemID.EYE_OF_NEWT),
+			TowerOfLifePlugin.parseInspect(Altar.NEWTROOST, "There is an eye of newt placed on the altar."));
+		assertEquals(ImmutableSet.of(ItemID.RED_SPIDERS_EGGS, ItemID.RAW_SARDINE),
+			TowerOfLifePlugin.parseInspect(Altar.SPIDINE, "There is some red spiders' eggs and a raw sardine<br>placed on the altar."));
+		assertEquals(ImmutableSet.of(ItemID.RED_SPIDERS_EGGS, ItemID.RAW_SARDINE),
+			TowerOfLifePlugin.parseInspect(Altar.SPIDINE, "You have all the materials necessary to activate this<br>altar!"));
+		assertEquals(ImmutableSet.of(),
+			TowerOfLifePlugin.parseInspect(Altar.SPIDINE, "You see some text scrolled above the altar on a symbol:<br>Red spider's eggs and a sardine raw..."));
+		assertNull(TowerOfLifePlugin.parseInspect(Altar.NEWTROOST, "Click here to continue"));
+		assertNull(TowerOfLifePlugin.parseInspect(Altar.NEWTROOST, null));
+	}
+
+	@Test
+	public void knownVarbitsCoverEveryItemOnce()
+	{
+		assertEquals(12, TowerOfLifePlugin.KNOWN_VARBITS.size());
+		assertEquals(TowerOfLifePlugin.SYMBOL_VARBITS, TowerOfLifePlugin.KNOWN_VARBITS.keySet());
+		Set<Integer> items = new HashSet<>(TowerOfLifePlugin.KNOWN_VARBITS.values());
+		assertEquals(12, items.size());
+		for (int item : items)
+		{
+			assertTrue(Altar.forItem(item) != null);
+		}
+	}
+
+	@Test
+	public void knownVarbitsWinOverConflictingLearnedOnes()
+	{
+		Map<Integer, Integer> merged = TowerOfLifePlugin.withKnownVarbits(ImmutableMap.of(
+			VarbitID.TOL_SYMBOL_OBJ7, ItemID.FEATHER,
+			VarbitID.TOL_SYMBOL_OBJ1, ItemID.RAW_SARDINE));
+		assertEquals(TowerOfLifePlugin.KNOWN_VARBITS, merged);
 	}
 }

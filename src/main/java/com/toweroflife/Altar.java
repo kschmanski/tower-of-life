@@ -98,23 +98,28 @@ enum Altar
 	}
 
 	/**
-	 * @return the id of the altar item with this name (ignoring case and apostrophes),
-	 * or -1 if no altar item has that name
+	 * @return the id of the altar item with this name (ignoring case, apostrophes and
+	 * spaces, since the game says "cow hide"), or -1 if no altar item has that name
 	 */
 	static int itemIdForName(String name)
 	{
-		String wanted = name.trim().toLowerCase().replace("'", "");
+		String wanted = normalizeName(name);
 		for (Altar altar : values())
 		{
 			for (int itemId : altar.getItemIds())
 			{
-				if (wanted.equals(altar.getItemName(itemId).toLowerCase().replace("'", "")))
+				if (wanted.equals(normalizeName(altar.getItemName(itemId))))
 				{
 					return itemId;
 				}
 			}
 		}
 		return -1;
+	}
+
+	private static String normalizeName(String name)
+	{
+		return name.toLowerCase().replace("'", "").replace(" ", "");
 	}
 
 	/**

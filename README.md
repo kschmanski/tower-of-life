@@ -27,13 +27,9 @@ Clicking Activate while carrying both items also works: the altar takes them fro
 
 ## How placed items are tracked
 
-The game stores which items are on each altar in 12 hidden flags (varbits), but the client data does not say which flag belongs to which item. The plugin:
+The game stores which items are on each altar in 12 varbits (`TOL_SYMBOL_OBJ1`–`12`), one per item. The plugin reads them directly, so the overlay matches the game from the moment you log in, including after a relog.
 
-1. Watches you use an item on an altar and the item leave your inventory, then marks it as placed. This is saved per account.
-2. Clears an altar when you activate it and its creature appears.
-3. Learns which flag matches an item the first time you place it. After that it reads the game's own state, so it stays accurate across restarts.
-
-Items placed before you installed the plugin show as missing until you place or activate again.
+Inspecting an altar also updates the overlay from what the dialogue says, as a backup.
 
 ## Configuration
 
