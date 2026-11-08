@@ -131,6 +131,13 @@ public class TowerOfLifePlugin extends Plugin
 	/** Items we saw the player place, used for items whose varbit is not learned yet. */
 	private final Set<Integer> locallyPlaced = new HashSet<>();
 
+	/**
+	 * Tick each item was last seen placed this session. Used so that activating an altar
+	 * only clears items placed before the activation, not ones pre-loaded while the
+	 * creature was still spawning.
+	 */
+	private final Map<Integer, Integer> placedTicks = new HashMap<>();
+
 	/** Learned symbol varbit id -> item id. */
 	private final Map<Integer, Integer> varbitToItem = new HashMap<>();
 	private final Map<Integer, Integer> itemToVarbit = new HashMap<>();
@@ -178,6 +185,7 @@ public class TowerOfLifePlugin extends Plugin
 		overlayManager.remove(overlay);
 		altars.clear();
 		locallyPlaced.clear();
+		placedTicks.clear();
 		varbitToItem.clear();
 		itemToVarbit.clear();
 		inventoryCounts.clear();
@@ -209,6 +217,22 @@ public class TowerOfLifePlugin extends Plugin
 	boolean isReady(Altar altar)
 	{
 		return isPlaced(altar.getFirstItemId()) && isPlaced(altar.getSecondItemId());
+	}
+
+	/**
+	 * @return whether activating now would create the creature: every item is either
+	 * on the altar or in the inventory, where activating takes it from
+	 */
+	private boolean canActivate(Altar altar)
+	{
+		for (int itemId : altar.getItemIds())
+		{
+			if (!isPlaced(itemId) && !isInInventory(itemId))
+			{
+				return false;
+			}
+		}
+		return true;
 	}
 
 	@Subscribe
@@ -280,8 +304,23 @@ public class TowerOfLifePlugin extends Plugin
 			Altar altar = Altar.nearest(point);
 			if (altar != null)
 			{
-				pendingActivation = altar;
-				pendingActivationTick = client.getTickCount();
+				// A new click replaces any "use item" still queued on this altar, so an item
+				// leaving the inventory now is the activation consuming it, not a placement
+				if (altar.requires(pendingItem))
+				{
+					pendingItem = -1;
+				}
+
+				// Only a click that can create the creature counts. Repeated clicks on an
+				// altar that is not loaded must not move the activation tick past items
+				// pre-loaded for the next creature.
+				boolean alreadyActivating = pendingActivation == altar
+					&& client.getTickCount() - pendingActivationTick <= PENDING_TIMEOUT_TICKS;
+				if (canActivate(altar) && !alreadyActivating)
+				{
+					pendingActivation = altar;
+					pendingActivationTick = client.getTickCount();
+				}
 			}
 		}
 	}
@@ -369,10 +408,15 @@ public class TowerOfLifePlugin extends Plugin
 		if (npc.getId() == pendingActivation.getNpcId()
 			&& npc.getWorldLocation().distanceTo2D(pendingActivation.getLocation()) <= CREATURE_SPAWN_DISTANCE)
 		{
-			// Our creature appeared, so the altar consumed both items
+			// Our creature appeared, so the altar consumed the items it had when activated.
+			// Keep any item placed after the Activate click (pre-loaded for the next creature).
 			for (int itemId : pendingActivation.getItemIds())
 			{
-				locallyPlaced.remove(itemId);
+				if (!placedAfter(itemId, pendingActivationTick))
+				{
+					locallyPlaced.remove(itemId);
+					placedTicks.remove(itemId);
+				}
 			}
 			savePlacedItems();
 			pendingActivation = null;
@@ -490,10 +534,21 @@ public class TowerOfLifePlugin extends Plugin
 		{
 			pendingItem = -1;
 		}
+		placedTicks.put(itemId, client.getTickCount());
 		if (locallyPlaced.add(itemId))
 		{
 			savePlacedItems();
 		}
+	}
+
+	/**
+	 * @return whether the item was placed after the given tick. Items restored from a
+	 * previous session have no tick and count as placed before it.
+	 */
+	private boolean placedAfter(int itemId, int tick)
+	{
+		Integer placed = placedTicks.get(itemId);
+		return placed != null && placed > tick;
 	}
 
 	/**
