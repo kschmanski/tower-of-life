@@ -34,6 +34,8 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import javax.inject.Inject;
 import lombok.AccessLevel;
@@ -50,6 +52,7 @@ import net.runelite.api.Scene;
 import net.runelite.api.Tile;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameObjectDespawned;
 import net.runelite.api.events.GameObjectSpawned;
 import net.runelite.api.events.GameStateChanged;
@@ -93,6 +96,9 @@ public class TowerOfLifePlugin extends Plugin
 		VarbitID.TOL_SYMBOL_OBJ7, VarbitID.TOL_SYMBOL_OBJ8, VarbitID.TOL_SYMBOL_OBJ9,
 		VarbitID.TOL_SYMBOL_OBJ10, VarbitID.TOL_SYMBOL_OBJ11, VarbitID.TOL_SYMBOL_OBJ12
 	);
+
+	private static final String ALTAR_NAME = "Symbol of life";
+	static final Pattern PLACED_MESSAGE = Pattern.compile("placed? the (.+?) on the altar", Pattern.CASE_INSENSITIVE);
 
 	private static final String VARBIT_MAPPING_KEY = "varbitMapping";
 	private static final String PLACED_ITEMS_KEY = "placedItems";
@@ -247,18 +253,23 @@ public class TowerOfLifePlugin extends Plugin
 	@Subscribe
 	public void onMenuOptionClicked(MenuOptionClicked event)
 	{
-		if (!ALTAR_OBJECT_IDS.contains(event.getId()))
+		String target = Text.removeTags(event.getMenuTarget());
+		if (!ALTAR_OBJECT_IDS.contains(event.getId()) && !target.endsWith(ALTAR_NAME))
 		{
 			return;
 		}
 
+		log.debug("Altar click: option={} target={} id={} action={}",
+			event.getMenuOption(), target, event.getId(), event.getMenuAction());
+
 		if (event.getMenuAction() == MenuAction.WIDGET_TARGET_ON_GAME_OBJECT)
 		{
 			// "Use <item> -> Symbol of life"
-			Widget selected = client.getSelectedWidget();
-			if (selected != null && Altar.forItem(selected.getItemId()) != null)
+			int itemId = selectedItemId(target);
+			log.debug("Used item {} on altar", itemId);
+			if (itemId != -1)
 			{
-				pendingItem = selected.getItemId();
+				pendingItem = itemId;
 				pendingItemTick = client.getTickCount();
 			}
 		}
@@ -293,11 +304,23 @@ public class TowerOfLifePlugin extends Plugin
 			return;
 		}
 
+		log.debug("Symbol varbit {} -> {} (pending item {})", varbit, event.getValue(), pendingItem);
+
 		if (event.getValue() == 1)
 		{
-			lastSetVarbit = varbit;
-			lastSetVarbitTick = client.getTickCount();
-			tryLearnVarbit();
+			if (hasPendingItem())
+			{
+				// The server flagged an item as placed right after we used one on an altar
+				int item = pendingItem;
+				markPlaced(item);
+				learnVarbit(varbit, item);
+			}
+			else
+			{
+				lastSetVarbit = varbit;
+				lastSetVarbitTick = client.getTickCount();
+				tryLearnVarbit();
+			}
 		}
 		else
 		{
@@ -307,6 +330,24 @@ public class TowerOfLifePlugin extends Plugin
 			{
 				savePlacedItems();
 			}
+		}
+	}
+
+	@Subscribe
+	public void onChatMessage(ChatMessage event)
+	{
+		// e.g. "You place the raw lobster on the altar." or "You already placed the feather on the altar!"
+		Matcher matcher = PLACED_MESSAGE.matcher(Text.removeTags(event.getMessage()));
+		if (!matcher.find())
+		{
+			return;
+		}
+
+		int itemId = Altar.itemIdForName(matcher.group(1));
+		log.debug("Placed message for '{}' -> item {}", matcher.group(1), itemId);
+		if (itemId != -1)
+		{
+			markPlaced(itemId);
 		}
 	}
 
@@ -398,16 +439,14 @@ public class TowerOfLifePlugin extends Plugin
 			}
 		}
 
-		if (inventoryKnown && pendingItem != -1)
+		if (inventoryKnown && hasPendingItem()
+			&& counts.getOrDefault(pendingItem, 0) < inventoryCounts.getOrDefault(pendingItem, 0))
 		{
-			if (client.getTickCount() - pendingItemTick > PENDING_TIMEOUT_TICKS)
-			{
-				pendingItem = -1;
-			}
-			else if (counts.getOrDefault(pendingItem, 0) < inventoryCounts.getOrDefault(pendingItem, 0))
-			{
-				onItemPlaced(pendingItem);
-			}
+			int item = pendingItem;
+			markPlaced(item);
+			lastPlacedItem = item;
+			lastPlacedTick = client.getTickCount();
+			tryLearnVarbit();
 		}
 
 		inventoryCounts.clear();
@@ -415,22 +454,51 @@ public class TowerOfLifePlugin extends Plugin
 		inventoryKnown = true;
 	}
 
-	private void onItemPlaced(int itemId)
+	/**
+	 * @return whether the player recently used an altar item on an altar and it has not
+	 * been seen placed yet
+	 */
+	private boolean hasPendingItem()
+	{
+		if (pendingItem != -1 && client.getTickCount() - pendingItemTick > PENDING_TIMEOUT_TICKS)
+		{
+			pendingItem = -1;
+		}
+		return pendingItem != -1;
+	}
+
+	/**
+	 * The item used on the altar: the selected inventory item, or failing that the item
+	 * named in a "Raw lobster -> Symbol of life" menu target.
+	 */
+	private int selectedItemId(String target)
+	{
+		Widget selected = client.getSelectedWidget();
+		if (selected != null && Altar.forItem(selected.getItemId()) != null)
+		{
+			return selected.getItemId();
+		}
+
+		int arrow = target.indexOf(" -> ");
+		return arrow > 0 ? Altar.itemIdForName(target.substring(0, arrow)) : -1;
+	}
+
+	private void markPlaced(int itemId)
 	{
 		log.debug("Placed {} on the {} altar", itemId, Altar.forItem(itemId));
-		pendingItem = -1;
-		locallyPlaced.add(itemId);
-		savePlacedItems();
-
-		lastPlacedItem = itemId;
-		lastPlacedTick = client.getTickCount();
-		tryLearnVarbit();
+		if (itemId == pendingItem)
+		{
+			pendingItem = -1;
+		}
+		if (locallyPlaced.add(itemId))
+		{
+			savePlacedItems();
+		}
 	}
 
 	/**
 	 * When an item leaves the inventory onto an altar and a symbol varbit is set at
-	 * nearly the same time, remember that the varbit tracks that item. After that the
-	 * plugin reads the server's state directly, so it also survives client restarts.
+	 * nearly the same time, remember that the varbit tracks that item.
 	 */
 	private void tryLearnVarbit()
 	{
@@ -444,7 +512,15 @@ public class TowerOfLifePlugin extends Plugin
 		int varbit = lastSetVarbit;
 		lastPlacedItem = -1;
 		lastSetVarbit = -1;
+		learnVarbit(varbit, item);
+	}
 
+	/**
+	 * Remember that a symbol varbit tracks an item. After that the plugin reads the
+	 * server's state directly, so it also survives client restarts.
+	 */
+	private void learnVarbit(int varbit, int item)
+	{
 		if (varbitToItem.containsKey(varbit) || itemToVarbit.containsKey(item))
 		{
 			return;

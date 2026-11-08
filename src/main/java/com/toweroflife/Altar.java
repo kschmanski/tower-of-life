@@ -98,6 +98,26 @@ enum Altar
 	}
 
 	/**
+	 * @return the id of the altar item with this name (ignoring case and apostrophes),
+	 * or -1 if no altar item has that name
+	 */
+	static int itemIdForName(String name)
+	{
+		String wanted = name.trim().toLowerCase().replace("'", "");
+		for (Altar altar : values())
+		{
+			for (int itemId : altar.getItemIds())
+			{
+				if (wanted.equals(altar.getItemName(itemId).toLowerCase().replace("'", "")))
+				{
+					return itemId;
+				}
+			}
+		}
+		return -1;
+	}
+
+	/**
 	 * @return the altar closest to the given point, or null if none is close enough
 	 */
 	@Nullable

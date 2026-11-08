@@ -94,4 +94,26 @@ public class TowerOfLifePluginTest
 		assertEquals(ImmutableSet.of(ItemID.FEATHER, ItemID.RAW_LOBSTER),
 			TowerOfLifePlugin.parseItems(ItemID.FEATHER + ", x," + ItemID.COINS + "," + ItemID.RAW_LOBSTER));
 	}
+
+	@Test
+	public void itemIdForNameMatchesGameNames()
+	{
+		assertEquals(ItemID.RAW_LOBSTER, Altar.itemIdForName("raw lobster"));
+		assertEquals(ItemID.RED_SPIDERS_EGGS, Altar.itemIdForName("Red spiders' eggs"));
+		assertEquals(ItemID.RED_SPIDERS_EGGS, Altar.itemIdForName("red spiders eggs"));
+		assertEquals(ItemID._100_JUBBLY_MEAT_RAW, Altar.itemIdForName(" Raw jubbly "));
+		assertEquals(-1, Altar.itemIdForName("Coins"));
+	}
+
+	@Test
+	public void placedMessageExtractsItemName()
+	{
+		java.util.regex.Matcher m = TowerOfLifePlugin.PLACED_MESSAGE.matcher("You place the raw lobster on the altar.");
+		assertTrue(m.find());
+		assertEquals("raw lobster", m.group(1));
+
+		m = TowerOfLifePlugin.PLACED_MESSAGE.matcher("You already placed the Feather on the altar!");
+		assertTrue(m.find());
+		assertEquals("Feather", m.group(1));
+	}
 }
