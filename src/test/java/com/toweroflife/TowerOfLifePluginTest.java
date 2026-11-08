@@ -124,6 +124,11 @@ public class TowerOfLifePluginTest
 			TowerOfLifePlugin.parseInspect(Altar.NEWTROOST, "There is an eye of newt placed on the altar."));
 		assertEquals(ImmutableSet.of(ItemID.RED_SPIDERS_EGGS, ItemID.RAW_SARDINE),
 			TowerOfLifePlugin.parseInspect(Altar.SPIDINE, "There is some red spiders' eggs and a raw sardine<br>placed on the altar."));
-		assertNull(TowerOfLifePlugin.parseInspect(Altar.NEWTROOST, "Feather of chicken and eye of newt..."));
+		assertEquals(ImmutableSet.of(ItemID.RED_SPIDERS_EGGS, ItemID.RAW_SARDINE),
+			TowerOfLifePlugin.parseInspect(Altar.SPIDINE, "You have all the materials necessary to activate this<br>altar!"));
+		assertEquals(ImmutableSet.of(),
+			TowerOfLifePlugin.parseInspect(Altar.SPIDINE, "You see some text scrolled above the altar on a symbol:<br>Red spider's eggs and a sardine raw..."));
+		assertNull(TowerOfLifePlugin.parseInspect(Altar.NEWTROOST, "Click here to continue"));
+		assertNull(TowerOfLifePlugin.parseInspect(Altar.NEWTROOST, null));
 	}
 }

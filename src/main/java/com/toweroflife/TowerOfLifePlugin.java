@@ -353,13 +353,13 @@ public class TowerOfLifePlugin extends Plugin
 			return;
 		}
 
-		Widget text = client.getWidget(InterfaceID.Objectbox.TEXT);
-		if (text == null || text.isHidden())
+		// One-item box: "There is an eye of newt placed on the altar."
+		// Two-item box: the recipe (empty altar) or "You have all the materials..."
+		Set<Integer> placed = parseInspect(pendingInspect, dialogueText(InterfaceID.Objectbox.TEXT));
+		if (placed == null)
 		{
-			return;
+			placed = parseInspect(pendingInspect, dialogueText(InterfaceID.ObjectboxDouble.TEXT));
 		}
-
-		Set<Integer> placed = parseInspect(pendingInspect, text.getText());
 		if (placed == null)
 		{
 			return;
@@ -380,21 +380,46 @@ public class TowerOfLifePlugin extends Plugin
 		pendingInspect = null;
 	}
 
+	@Nullable
+	private String dialogueText(int componentId)
+	{
+		Widget widget = client.getWidget(componentId);
+		return widget == null || widget.isHidden() ? null : widget.getText();
+	}
+
 	/**
-	 * Parses the Inspect dialogue of an altar, e.g. "There is an eye of newt placed on the altar."
+	 * Parses the Inspect dialogue of an altar: "There is an eye of newt placed on the altar.",
+	 * "You have all the materials necessary to activate this altar!", or the recipe
+	 * ("You see some text scrolled above the altar on a symbol: ...") for an empty altar.
 	 *
-	 * @return the altar's items named as placed, or null if the text is not a placed-items message
+	 * @return the altar's items that are placed, or null if the text is none of these
 	 */
 	@Nullable
 	static Set<Integer> parseInspect(Altar altar, String text)
 	{
+		if (text == null)
+		{
+			return null;
+		}
+
 		String normalized = Text.removeTags(text).toLowerCase().replace("'", "");
+		Set<Integer> placed = new HashSet<>();
+		if (normalized.contains("you have all the materials"))
+		{
+			placed.add(altar.getFirstItemId());
+			placed.add(altar.getSecondItemId());
+			return placed;
+		}
+		if (normalized.contains("text scrolled above the altar"))
+		{
+			// The recipe is shown when nothing is on the altar
+			return placed;
+		}
 		if (!normalized.contains("placed on the altar"))
 		{
 			return null;
 		}
 
-		Set<Integer> placed = new HashSet<>();
 		for (int itemId : altar.getItemIds())
 		{
 			if (normalized.contains(altar.getItemName(itemId).toLowerCase().replace("'", "")))
