@@ -8,9 +8,13 @@ Each Symbol of life altar needs two items before you can activate it to create a
 - the two items it needs, and whether each one is **placed** (green), **in your inventory** (yellow), or still **needed** (red)
 - an outline around the altar: cyan when it is ready to activate, yellow when you are carrying everything it still needs, red otherwise
 
-![Overlay preview](docs/overlay-preview.png)
+| Ready to activate | One placed, one carried |
+|---|---|
+| ![Ready to activate](docs/ready.png) | ![One item placed](docs/in-progress.png) |
+| **Carrying both items** | **Nothing placed or carried** |
+| ![Carrying both items](docs/carrying.png) | ![Items needed](docs/needed.png) |
 
-*The image above is a preview of the overlay drawing code on a plain background, not an in-game screenshot.*
+Clicking Activate while carrying both items also works: the altar takes them from your inventory and creates the creature in one step.
 
 | Creature | Items |
 |---|---|
