@@ -26,6 +26,7 @@ package com.toweroflife;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.inject.Provides;
 import java.util.Collections;
@@ -64,6 +65,7 @@ import net.runelite.api.events.NpcSpawned;
 import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
+import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.ObjectID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
@@ -102,6 +104,15 @@ public class TowerOfLifePlugin extends Plugin
 
 	private static final String ALTAR_NAME = "Symbol of life";
 	static final Pattern PLACED_MESSAGE = Pattern.compile("placed? the (.+?) on the altar", Pattern.CASE_INSENSITIVE);
+
+	/**
+	 * Symbol varbits confirmed in game. Others are learned as the player places items.
+	 */
+	static final Map<Integer, Integer> KNOWN_VARBITS = ImmutableMap.of(
+		VarbitID.TOL_SYMBOL_OBJ7, ItemID.RED_SPIDERS_EGGS,
+		VarbitID.TOL_SYMBOL_OBJ8, ItemID.RAW_SARDINE,
+		VarbitID.TOL_SYMBOL_OBJ9, ItemID.RAW_SWORDFISH
+	);
 
 	private static final String VARBIT_MAPPING_KEY = "varbitMapping";
 	private static final String PLACED_ITEMS_KEY = "placedItems";
@@ -705,7 +716,7 @@ public class TowerOfLifePlugin extends Plugin
 	{
 		varbitToItem.clear();
 		itemToVarbit.clear();
-		varbitToItem.putAll(parseMapping(configManager.getConfiguration(TowerOfLifeConfig.GROUP, VARBIT_MAPPING_KEY)));
+		varbitToItem.putAll(withKnownVarbits(parseMapping(configManager.getConfiguration(TowerOfLifeConfig.GROUP, VARBIT_MAPPING_KEY))));
 		varbitToItem.forEach((varbit, item) -> itemToVarbit.put(item, varbit));
 	}
 
@@ -763,6 +774,23 @@ public class TowerOfLifePlugin extends Plugin
 				log.debug("Ignoring bad varbit mapping entry {}", entry);
 			}
 		}
+		return mapping;
+	}
+
+	/**
+	 * Combines the confirmed varbits with learned ones. Confirmed entries win, and a
+	 * learned entry that conflicts with one (same varbit or same item) is dropped.
+	 */
+	static Map<Integer, Integer> withKnownVarbits(Map<Integer, Integer> learned)
+	{
+		Map<Integer, Integer> mapping = new HashMap<>(KNOWN_VARBITS);
+		learned.forEach((varbit, item) ->
+		{
+			if (!mapping.containsKey(varbit) && !mapping.containsValue(item))
+			{
+				mapping.put(varbit, item);
+			}
+		});
 		return mapping;
 	}
 

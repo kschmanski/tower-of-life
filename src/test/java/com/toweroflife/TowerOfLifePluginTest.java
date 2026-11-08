@@ -131,4 +131,18 @@ public class TowerOfLifePluginTest
 		assertNull(TowerOfLifePlugin.parseInspect(Altar.NEWTROOST, "Click here to continue"));
 		assertNull(TowerOfLifePlugin.parseInspect(Altar.NEWTROOST, null));
 	}
+
+	@Test
+	public void knownVarbitsWinOverConflictingLearnedOnes()
+	{
+		Map<Integer, Integer> merged = TowerOfLifePlugin.withKnownVarbits(ImmutableMap.of(
+			VarbitID.TOL_SYMBOL_OBJ7, ItemID.FEATHER,
+			VarbitID.TOL_SYMBOL_OBJ1, ItemID.RAW_SARDINE,
+			VarbitID.TOL_SYMBOL_OBJ2, ItemID.EYE_OF_NEWT));
+		assertEquals(ImmutableMap.of(
+			VarbitID.TOL_SYMBOL_OBJ7, ItemID.RED_SPIDERS_EGGS,
+			VarbitID.TOL_SYMBOL_OBJ8, ItemID.RAW_SARDINE,
+			VarbitID.TOL_SYMBOL_OBJ9, ItemID.RAW_SWORDFISH,
+			VarbitID.TOL_SYMBOL_OBJ2, ItemID.EYE_OF_NEWT), merged);
+	}
 }
