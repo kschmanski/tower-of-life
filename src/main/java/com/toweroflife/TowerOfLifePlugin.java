@@ -103,16 +103,28 @@ public class TowerOfLifePlugin extends Plugin
 	);
 
 	private static final String ALTAR_NAME = "Symbol of life";
-	static final Pattern PLACED_MESSAGE = Pattern.compile("placed? the (.+?) on the altar", Pattern.CASE_INSENSITIVE);
+	static final Pattern PLACED_MESSAGE = Pattern.compile("placed? (?:an?|some|the) (.+?) on the altar", Pattern.CASE_INSENSITIVE);
 
 	/**
-	 * Symbol varbits confirmed in game. Others are learned as the player places items.
+	 * Which item each symbol varbit tracks, confirmed in game. Each altar uses a pair of
+	 * adjacent varbits, clockwise from the north-west altar, with the first item named in
+	 * the altar's inspect text on the lower varbit. Raw jubbly and raw chicken follow from
+	 * the other item of their pair.
 	 */
-	static final Map<Integer, Integer> KNOWN_VARBITS = ImmutableMap.of(
-		VarbitID.TOL_SYMBOL_OBJ7, ItemID.RED_SPIDERS_EGGS,
-		VarbitID.TOL_SYMBOL_OBJ8, ItemID.RAW_SARDINE,
-		VarbitID.TOL_SYMBOL_OBJ9, ItemID.RAW_SWORDFISH
-	);
+	static final Map<Integer, Integer> KNOWN_VARBITS = ImmutableMap.<Integer, Integer>builder()
+		.put(VarbitID.TOL_SYMBOL_OBJ1, ItemID.UNICORN_HORN)
+		.put(VarbitID.TOL_SYMBOL_OBJ2, ItemID.COW_HIDE)
+		.put(VarbitID.TOL_SYMBOL_OBJ3, ItemID.FEATHER)
+		.put(VarbitID.TOL_SYMBOL_OBJ4, ItemID.EYE_OF_NEWT)
+		.put(VarbitID.TOL_SYMBOL_OBJ5, ItemID._100_JUBBLY_MEAT_RAW)
+		.put(VarbitID.TOL_SYMBOL_OBJ6, ItemID.RAW_LOBSTER)
+		.put(VarbitID.TOL_SYMBOL_OBJ7, ItemID.RED_SPIDERS_EGGS)
+		.put(VarbitID.TOL_SYMBOL_OBJ8, ItemID.RAW_SARDINE)
+		.put(VarbitID.TOL_SYMBOL_OBJ9, ItemID.RAW_SWORDFISH)
+		.put(VarbitID.TOL_SYMBOL_OBJ10, ItemID.RAW_CHICKEN)
+		.put(VarbitID.TOL_SYMBOL_OBJ11, ItemID.GIANT_FROG_LEGS)
+		.put(VarbitID.TOL_SYMBOL_OBJ12, ItemID.RAW_CAVE_EEL)
+		.build();
 
 	private static final String VARBIT_MAPPING_KEY = "varbitMapping";
 	private static final String PLACED_ITEMS_KEY = "placedItems";
@@ -491,7 +503,7 @@ public class TowerOfLifePlugin extends Plugin
 	@Subscribe
 	public void onChatMessage(ChatMessage event)
 	{
-		// e.g. "You place the raw lobster on the altar." or "You already placed the feather on the altar!"
+		// e.g. "You place a raw cave eel on the altar." (a backup for when no varbit changes)
 		Matcher matcher = PLACED_MESSAGE.matcher(Text.removeTags(event.getMessage()));
 		if (!matcher.find())
 		{

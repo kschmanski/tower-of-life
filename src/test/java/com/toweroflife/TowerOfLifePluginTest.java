@@ -112,9 +112,14 @@ public class TowerOfLifePluginTest
 		assertTrue(m.find());
 		assertEquals("raw lobster", m.group(1));
 
-		m = TowerOfLifePlugin.PLACED_MESSAGE.matcher("You already placed the Feather on the altar!");
+		m = TowerOfLifePlugin.PLACED_MESSAGE.matcher("You place a cow hide on the altar. You have all the materials necessary to activate this altar!");
 		assertTrue(m.find());
-		assertEquals("Feather", m.group(1));
+		assertEquals("cow hide", m.group(1));
+		assertEquals(ItemID.COW_HIDE, Altar.itemIdForName(m.group(1)));
+
+		m = TowerOfLifePlugin.PLACED_MESSAGE.matcher("You place an eye of newt on the altar.");
+		assertTrue(m.find());
+		assertEquals(ItemID.EYE_OF_NEWT, Altar.itemIdForName(m.group(1)));
 	}
 
 	@Test
@@ -133,16 +138,24 @@ public class TowerOfLifePluginTest
 	}
 
 	@Test
+	public void knownVarbitsCoverEveryItemOnce()
+	{
+		assertEquals(12, TowerOfLifePlugin.KNOWN_VARBITS.size());
+		assertEquals(TowerOfLifePlugin.SYMBOL_VARBITS, TowerOfLifePlugin.KNOWN_VARBITS.keySet());
+		Set<Integer> items = new HashSet<>(TowerOfLifePlugin.KNOWN_VARBITS.values());
+		assertEquals(12, items.size());
+		for (int item : items)
+		{
+			assertTrue(Altar.forItem(item) != null);
+		}
+	}
+
+	@Test
 	public void knownVarbitsWinOverConflictingLearnedOnes()
 	{
 		Map<Integer, Integer> merged = TowerOfLifePlugin.withKnownVarbits(ImmutableMap.of(
 			VarbitID.TOL_SYMBOL_OBJ7, ItemID.FEATHER,
-			VarbitID.TOL_SYMBOL_OBJ1, ItemID.RAW_SARDINE,
-			VarbitID.TOL_SYMBOL_OBJ2, ItemID.EYE_OF_NEWT));
-		assertEquals(ImmutableMap.of(
-			VarbitID.TOL_SYMBOL_OBJ7, ItemID.RED_SPIDERS_EGGS,
-			VarbitID.TOL_SYMBOL_OBJ8, ItemID.RAW_SARDINE,
-			VarbitID.TOL_SYMBOL_OBJ9, ItemID.RAW_SWORDFISH,
-			VarbitID.TOL_SYMBOL_OBJ2, ItemID.EYE_OF_NEWT), merged);
+			VarbitID.TOL_SYMBOL_OBJ1, ItemID.RAW_SARDINE));
+		assertEquals(TowerOfLifePlugin.KNOWN_VARBITS, merged);
 	}
 }
